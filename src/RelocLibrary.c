@@ -21,10 +21,10 @@ dl_new_hash(const char *s)
 // find symbol `name` inside the symbol table of `dep`
 void *symbolLookup(LinkMap *dep, const char *name)
 {
-    if(dep->fake)
+    if (dep->fake)
     {
         void *handle = dlopen(dep->name, RTLD_LAZY);
-        if(!handle)
+        if (!handle)
         {
             fprintf(stderr, "relocLibrary error: cannot dlopen a fake object named %s", dep->name);
             abort();
@@ -58,7 +58,7 @@ void *symbolLookup(LinkMap *dep, const char *name)
                        Hash table has done its job */
                     const char *symname = strtab + symtab[symidx].st_name;
                     if (!strcmp(symname, name))
-                    {    
+                    {
                         Elf64_Sym *s = &symtab[symidx];
                         // return the real address of found symbol
                         return (void *)(s->st_value + dep->addr);
@@ -67,10 +67,65 @@ void *symbolLookup(LinkMap *dep, const char *name)
             } while ((*hasharr++ & 1u) == 0);
         }
     }
-    return NULL; //not this dependency
+    return NULL; // not this dependency
 }
 
 void RelocLibrary(LinkMap *lib, int mode)
 {
     /* Your code here */
+    if (lib->dynInfo[DT_JMPREL])
+    {
+        Elf64_Rela *PLT_reloc_addr = (Elf64_Rela *)lib->dynInfo[DT_JMPREL]->d_un.d_ptr;
+        u_int64_t PLT_size = lib->dynInfo[DT_PLTRELSZ]->d_un.d_val;
+        Elf64_Sym *Table_sym_addr = (Elf64_Sym *)lib->dynInfo[DT_SYMTAB]->d_un.d_ptr;
+        const char *Table_sym_str_addr = (const char *)lib->dynInfo[DT_STRTAB]->d_un.d_ptr;
+        // void *handle = dlopen("libc.so.6", RTLD_LAZY);
+        for (u_int64_t i = 0; i < PLT_size / sizeof(Elf64_Rela); ++i)
+        {
+            int PLT_index = (PLT_reloc_addr[i].r_info) >> 32;
+            const char *str_addr = (Table_sym_str_addr + Table_sym_addr[PLT_index].st_name);
+
+            // void *address = dlsym(handle, (const char *)str_addr);
+            void *address = symbolLookup(lib, (const char *)str_addr);
+
+            if (lib->searchList != NULL)
+            {
+                address = symbolLookup(lib->searchList[0], str_addr);
+            }
+
+            Elf64_Addr *got_addr = (Elf64_Addr *)(lib->addr + PLT_reloc_addr[i].r_offset);
+            *got_addr = (Elf64_Addr)(address + PLT_reloc_addr[i].r_addend);
+        }
+    }
+
+    if (lib->dynInfo[DT_RELA])
+    {
+        Elf64_Rela *rela_addr = (Elf64_Rela *)lib->dynInfo[DT_RELA]->d_un.d_ptr;
+        u_int64_t rela_size = lib->dynInfo[DT_RELACOUNT_NEW]->d_un.d_val;
+
+        for (u_int64_t i = 0; i < rela_size; ++i)
+        {
+            Elf64_Addr *got_addr = (Elf64_Addr *)(lib->addr + rela_addr[i].r_offset);
+            *got_addr = (Elf64_Addr)(lib->addr + rela_addr[i].r_addend);
+        }
+
+        u_int64_t rela_glob_size = lib->dynInfo[DT_RELASZ]->d_un.d_val;
+        u_int64_t rela_glob_sz = lib->dynInfo[DT_RELAENT]->d_un.d_val;
+        rela_glob_size = rela_glob_size / rela_glob_sz;
+
+        Elf64_Sym *Table_sym_addr = (Elf64_Sym *)lib->dynInfo[DT_SYMTAB]->d_un.d_ptr;
+        const char *Table_sym_str_addr = (const char *)lib->dynInfo[DT_STRTAB]->d_un.d_ptr;
+
+        for (u_int64_t i = rela_size; i < rela_glob_size; ++i)
+        {
+            if ((rela_addr[i].r_info & 0xffffffff) == 6)
+            {
+                int index = (rela_addr[i].r_info) >> 32;
+                const char *str_addr = (Table_sym_str_addr + Table_sym_addr[index].st_name);
+                void *address = symbolLookup(lib, (const char *)str_addr);
+                Elf64_Addr *got_addr = (Elf64_Addr *)(lib->addr + rela_addr[i].r_offset);
+                *got_addr = (Elf64_Addr)(address + rela_addr[i].r_addend);
+            }
+        }
+    }
 }

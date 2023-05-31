@@ -11,16 +11,10 @@
 #include <stdint.h>
 #include <elf.h>
 
-#include "../util/shim.h"
 
-/* Prevent unreadable *_NEW, instead we redefine it to fit in array */
 #define OS_SPECIFIC_FLAG 2
-#define DT_RELACOUNT_ 0x6ffffff9
-#define DT_GNU_HASH_  0x6ffffef5
-#undef DT_RELACOUNT
-#undef DT_GNU_HASH
-#define DT_RELACOUNT (DT_NUM)
-#define DT_GNU_HASH (DT_NUM + 1)
+#define DT_RELACOUNT_NEW (DT_NUM)
+#define DT_GNU_HASH_NEW (DT_NUM + 1)
 
 /* DO NOT MODIFY ANYTHING ABOVE */
 
@@ -29,11 +23,15 @@ typedef struct linkMap
     // base address of the library
     uint64_t addr;
     // name of the library
-    const char *name;
+    char *name;
     // absolute address of dynamic segment
     Elf64_Dyn *dyn;
+    struct linkMap *next;
+    
+    struct linkMap **searchList;
     // a copy of dynamic segement, leave it alone
     Elf64_Dyn *dynInfo[DT_NUM + OS_SPECIFIC_FLAG];
+    FILE *fs;
     // if we need the original dlopen to correctly handle this library
     int fake;
     void *fakeHandle;
@@ -47,9 +45,6 @@ typedef struct linkMap
     const Elf64_Addr *l_gnu_bitmask;
     const Elf32_Word *l_gnu_buckets;
     const Elf32_Word *l_gnu_chain_zero;
-
-    /* Do not modify anything above */
-    /* Your code here */
 } LinkMap;
 
 #endif /* Link.h */
