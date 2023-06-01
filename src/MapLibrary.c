@@ -99,48 +99,55 @@ void *MapLibrary(const char *libpath)
     /* Your code here */
     LinkMap *lib = malloc(sizeof(LinkMap));
 
-    int fd = open(libpath, O_RDWR);
-    Elf64_Ehdr *EhdrBuf = malloc(sizeof(Elf64_Ehdr));
-    lseek(fd, 0, SEEK_SET);
-    read(fd, EhdrBuf, sizeof(Elf64_Ehdr));
+    // Load ELF Header
+    int fd = open(libpath, O_RDONLY);
+    Elf64_Ehdr EhdrBuf;
+    // lseek(fd, 0, SEEK_SET);
+    read(fd, &EhdrBuf, sizeof(Elf64_Ehdr));
 
-    Elf64_Phdr *PhdrBuf = malloc(sizeof(Elf64_Phdr));
     int num = 0;
-    uint64_t Paddr;
+    void *Paddr;
     uint64_t fullsize = 0;
-    for (int i = 0; i < EhdrBuf->e_phnum; ++i) // find allocation space needed
+    // Load program header
+    Elf64_Phdr *PhdrBufs = malloc(EhdrBuf.e_phnum * sizeof(Elf64_Phdr));
+    lseek(fd, EhdrBuf.e_phoff, SEEK_SET);
+    read(fd, PhdrBufs, EhdrBuf.e_phnum * sizeof(Elf64_Phdr));
+
+    for (int i = 0; i < EhdrBuf.e_phnum; ++i) // find allocation space needed
     {
-        lseek(fd, EhdrBuf->e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
-        read(fd, PhdrBuf, sizeof(Elf64_Phdr));
-        if (PhdrBuf->p_type == PT_LOAD)
+        // lseek(fd, EhdrBuf.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
+        // read(fd, &PhdrBuf, sizeof(Elf64_Phdr));
+        if (PhdrBufs[i].p_type == PT_LOAD)
         {
-            fullsize += ALIGN_UP(PhdrBuf->p_vaddr + PhdrBuf->p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBuf->p_vaddr, getpagesize());
+            fullsize += ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize());
         }
     }
-    for (int i = 0; i < EhdrBuf->e_phnum; ++i)
+    Paddr = malloc(fullsize);
+    lib->addr = (uint64_t) Paddr;
+    // lseek(fd, EhdrBuf.e_phoff, SEEK_SET);
+    for (int i = 0; i < EhdrBuf.e_phnum; ++i)
     {
-        lseek(fd, EhdrBuf->e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
-        read(fd, PhdrBuf, sizeof(Elf64_Phdr));
-        if (PhdrBuf->p_type == PT_LOAD)
+        // lseek(fd, EhdrBuf.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
+        // read(fd, PhdrBuf, sizeof(Elf64_Phdr));
+        if (PhdrBufs[i].p_type == PT_LOAD)
         {
             int prot = 0;
-            prot |= (PhdrBuf->p_flags & PF_R) ? PROT_READ : 0;
-            prot |= (PhdrBuf->p_flags & PF_W) ? PROT_WRITE : 0;
-            prot |= (PhdrBuf->p_flags & PF_X) ? PROT_EXEC : 0;
-            // PageSz = ALIGN_UP(getpagesize(), PhdrBuf->p_align);
+            prot |= (PhdrBufs[i].p_flags & PF_R) ? PROT_READ : 0;
+            prot |= (PhdrBufs[i].p_flags & PF_W) ? PROT_WRITE : 0;
+            prot |= (PhdrBufs[i].p_flags & PF_X) ? PROT_EXEC : 0;
 
-            if (!num) // first, get enough space
-            {
-
-                lib->addr = (uint64_t)mmap(0, fullsize, prot, MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBuf->p_offset, getpagesize()));
-                Paddr = lib->addr + ALIGN_UP(PhdrBuf->p_vaddr + PhdrBuf->p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBuf->p_vaddr, getpagesize());
-                ++num;
-            }
-            else
-            {
-                mmap((void *)Paddr, ALIGN_UP(PhdrBuf->p_vaddr + PhdrBuf->p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBuf->p_vaddr, getpagesize()), prot, MAP_FIXED | MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBuf->p_offset, getpagesize()));
-                Paddr += ALIGN_UP(PhdrBuf->p_vaddr + PhdrBuf->p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBuf->p_vaddr, getpagesize());
-            }
+            // if (!num) // first, get enough space
+            // {
+            //     lib->addr = (uint64_t)mmap(NULL, fullsize, prot, MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBufs[i].p_offset, getpagesize()));
+            //     Paddr = (void *)(lib->addr + ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize()));
+            //     ++num;
+            // }
+            // else
+            // {
+                size_t len = ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize());
+                mmap(Paddr, len, prot, MAP_FIXED | MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBufs[i].p_offset, getpagesize()));
+                Paddr = (void *)((uint64_t)Paddr + ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize()));
+            // }
             /*if(Saddr >= PhdrBuf->p_offset && Saddr < PhdrBuf->p_offset + PhdrBuf->p_filesz)
             {
                 lib->dyn = (Paddr - (ALIGN_UP(PhdrBuf->p_vaddr + PhdrBuf->p_memsz, PageSz) - ALIGN_DOWN(PhdrBuf->p_vaddr, PageSz))) + (PhdrBuf->p_offset - ALIGN_DOWN(PhdrBuf->p_offset, PageSz)) + (Saddr - PhdrBuf->p_vaddr);
@@ -149,15 +156,20 @@ void *MapLibrary(const char *libpath)
     }
 
     // uint64_t Saddr, Soff;
-    Elf64_Shdr *ShdrBuf = malloc(sizeof(Elf64_Shdr));
-    for (int i = 0; i < EhdrBuf->e_shnum; ++i)
+    // Read segment headers
+    Elf64_Shdr *ShdrBufs = malloc(EhdrBuf.e_shnum * sizeof(Elf64_Shdr));
+
+    lseek(fd, EhdrBuf.e_shoff, SEEK_SET);
+    read(fd, ShdrBufs, EhdrBuf.e_shnum * sizeof(Elf64_Shdr));
+
+    for (int i = 0; i < EhdrBuf.e_shnum; ++i)
     {
-        lseek(fd, EhdrBuf->e_shoff + i * sizeof(Elf64_Shdr), SEEK_SET);
-        read(fd, ShdrBuf, sizeof(Elf64_Shdr));
-        if (ShdrBuf->sh_type == SHT_DYNAMIC)
+        // lseek(fd, EhdrBuf.e_shoff + i * sizeof(Elf64_Shdr), SEEK_SET);
+        // read(fd, ShdrBuf, sizeof(Elf64_Shdr));
+        if (ShdrBufs[i].sh_type == SHT_DYNAMIC)
         {
             // Saddr = ShdrBuf->sh_offset;
-            lib->dyn = (Elf64_Dyn *)(ShdrBuf->sh_addr + lib->addr);
+            lib->dyn = (Elf64_Dyn *)(ShdrBufs[i].sh_addr + lib->addr);
             break;
         }
     }
@@ -165,16 +177,17 @@ void *MapLibrary(const char *libpath)
     fill_info(lib);
     setup_hash(lib);
 
-    free(EhdrBuf);
-    EhdrBuf = NULL;
-    free(PhdrBuf);
-    PhdrBuf = NULL;
-    free(ShdrBuf);
-    ShdrBuf = NULL;
+    // free(EhdrBuf);
+    // EhdrBuf = NULL;
+    free(PhdrBufs);
+    PhdrBufs = NULL;
+    free(ShdrBufs);
+    ShdrBufs = NULL;
 
     int fake = 1, cnt = 0;
     num = 0;
     Elf64_Dyn *dyn = lib->dyn;
+    size_t dyn_size = 0;
     while (dyn->d_tag != DT_NULL)
     {
         if (dyn->d_tag == DT_RUNPATH)
@@ -186,19 +199,21 @@ void *MapLibrary(const char *libpath)
             ++num;
         }
         ++dyn;
+        ++dyn_size;
     }
 
     if (num)
     {
-
-        lib->searchList = malloc(sizeof(LinkMap));
+        lib->searchList = malloc(dyn_size * sizeof(LinkMap *));
+        // lib->searchList = malloc(sizeof(LinkMap));
         const char *Table_sym_str_addr = (const char *)(lib->dynInfo[DT_STRTAB]->d_un.d_ptr);
         char *lib_name = (char *)(lib->dynInfo[DT_NEEDED]->d_un.d_ptr + Table_sym_str_addr);
         dyn = lib->dyn;
 
-        while (dyn->d_tag != DT_NULL)
+        // while (dyn->d_tag != DT_NULL)
+        for (int i = 0; i < dyn_size; i++)
         {
-            if (dyn->d_tag == DT_NEEDED)
+            if (dyn[i].d_tag == DT_NEEDED)
             {
                 if (fake)
                 {
@@ -217,7 +232,6 @@ void *MapLibrary(const char *libpath)
                     lib->searchList[cnt++]->name = file;
                 }
             }
-            ++dyn;
         }
     }
 
