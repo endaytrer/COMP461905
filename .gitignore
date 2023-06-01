@@ -3,6 +3,7 @@
 !/**/
 **.so
 !Makefile
+.vscode
 build
 src/orig
 legacy

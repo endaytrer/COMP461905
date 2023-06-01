@@ -49,6 +49,7 @@ static void fill_info(LinkMap *lib)
 {
     Elf64_Dyn *dyn = lib->dyn;
     Elf64_Dyn **dyn_info = lib->dynInfo;
+    memset(lib->dynInfo, 0, (DT_NUM + 2) * sizeof(Elf64_Dyn *));
 
     while (dyn->d_tag != DT_NULL)
     {
@@ -122,32 +123,30 @@ void *MapLibrary(const char *libpath)
             fullsize += ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize());
         }
     }
-    Paddr = malloc(fullsize);
-    lib->addr = (uint64_t) Paddr;
-    // lseek(fd, EhdrBuf.e_phoff, SEEK_SET);
+    // Paddr = malloc(fullsize);
+    // lib->addr = (uint64_t) Paddr;
     for (int i = 0; i < EhdrBuf.e_phnum; ++i)
     {
-        // lseek(fd, EhdrBuf.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
-        // read(fd, PhdrBuf, sizeof(Elf64_Phdr));
         if (PhdrBufs[i].p_type == PT_LOAD)
         {
+            // num = 1;
             int prot = 0;
             prot |= (PhdrBufs[i].p_flags & PF_R) ? PROT_READ : 0;
             prot |= (PhdrBufs[i].p_flags & PF_W) ? PROT_WRITE : 0;
             prot |= (PhdrBufs[i].p_flags & PF_X) ? PROT_EXEC : 0;
 
-            // if (!num) // first, get enough space
-            // {
-            //     lib->addr = (uint64_t)mmap(NULL, fullsize, prot, MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBufs[i].p_offset, getpagesize()));
-            //     Paddr = (void *)(lib->addr + ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize()));
-            //     ++num;
-            // }
-            // else
-            // {
+            if (!num) // first, get enough space
+            {
+                lib->addr = (uint64_t)mmap(NULL, fullsize, prot, MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBufs[i].p_offset, getpagesize()));
+                Paddr = (void *)(lib->addr + ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize()));
+                ++num;
+            }
+            else
+            {
                 size_t len = ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize());
                 mmap(Paddr, len, prot, MAP_FIXED | MAP_PRIVATE, fd, ALIGN_DOWN(PhdrBufs[i].p_offset, getpagesize()));
                 Paddr = (void *)((uint64_t)Paddr + ALIGN_UP(PhdrBufs[i].p_vaddr + PhdrBufs[i].p_memsz, getpagesize()) - ALIGN_DOWN(PhdrBufs[i].p_vaddr, getpagesize()));
-            // }
+            }
             /*if(Saddr >= PhdrBuf->p_offset && Saddr < PhdrBuf->p_offset + PhdrBuf->p_filesz)
             {
                 lib->dyn = (Paddr - (ALIGN_UP(PhdrBuf->p_vaddr + PhdrBuf->p_memsz, PageSz) - ALIGN_DOWN(PhdrBuf->p_vaddr, PageSz))) + (PhdrBuf->p_offset - ALIGN_DOWN(PhdrBuf->p_offset, PageSz)) + (Saddr - PhdrBuf->p_vaddr);

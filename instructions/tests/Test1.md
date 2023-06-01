@@ -73,7 +73,7 @@ the type of a relocation and symbol index, which use lower and upper 32 bit of a
 ---
 *More on `r_info`*: For example, `r_info` of the relocation entry `puts` is `0x000200000007`, which is actually
 `(2 << 32) | 7`. Its relocation type is `R_X86_64_JUMP_SLOT`, defined as `7` that can be found in <elf.h>.
-`2` means its index is 2 in symbol table.
+`2` means its index is 2 in symbol table.`
 
 
 ```bash
@@ -86,7 +86,7 @@ Contents of section .dynsym:
  0358 00000000 00000000** 01000000 20000000  ............ ...
  ...
 ```
-The size of `Elf64_Sym` is 24 bytes, so index 2 in symbol table starts from `0x348`. The first 4 bytes 
+The size of `Elf64_Sym` is 0x18 bytes, so index 2 in symbol table starts from `0x348`. The first 4 bytes 
 stand for offset in string table, which is `0x59` (NB: little endian), *i.e.* `89`.
 ```bash
 $ objdump -s ./test_lib/lib1.so
