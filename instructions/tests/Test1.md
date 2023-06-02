@@ -114,7 +114,7 @@ $ readelf -d ./test_lib/lib1.so
  ...
 ```
 Here is an image on all the sections talked above, hopefully it can help you understand this process better.
-![Some text](./img/plt-cut.png)
+![Some text](../../img/plt-cut.png)
 
 So again, the problem is broken into pieces: 
 
