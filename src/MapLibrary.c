@@ -97,9 +97,23 @@ void *MapLibrary(const char *libpath)
      * 
      * return lib;
     */
-   
-    LinkMap *lib = malloc(sizeof(LinkMap));
     
+    LinkMap *lib = malloc(sizeof(LinkMap));
+
+    for (int i = 0; i < sizeof(sys_path) / sizeof(const char *); i++) {
+        for (int j = 0; j < sizeof(fake_so) / sizeof(const char *); j++) {
+            char buf[42];
+            memset(buf, 0, sizeof(buf));
+            strcpy(buf, sys_path[i]);
+            strcat(buf, fake_so[j]);
+            if (strcmp(libpath, buf) == 0) {
+                lib->name = libpath;
+                lib->fake = 1;
+                return lib;
+            }
+        }
+    }
+
     int fd;
     if ((fd = open(libpath, O_RDWR)) < 0)
         return NULL;
@@ -131,6 +145,7 @@ void *MapLibrary(const char *libpath)
             zero_offset = -ALIGN_DOWN(program_headers[i].p_offset, getpagesize());
             lib->addr = (uint64_t)mmap(NULL, total_size, prot, MAP_PRIVATE, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
             back = (void *)(lib->addr + aligned_size);
+            lib->addr += zero_offset;
             continue;
         }
         back = mmap(back, aligned_size, prot, MAP_PRIVATE | MAP_FIXED, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
@@ -146,7 +161,7 @@ void *MapLibrary(const char *libpath)
 
     for (int i = 0; i < elf_header.e_shnum; i++) {
         if (section_headers[i].sh_type == SHT_DYNAMIC) {
-            lib->dyn = (Elf64_Dyn * )(lib->addr + zero_offset + section_headers[i].sh_addr);
+            lib->dyn = (Elf64_Dyn *)(lib->addr + section_headers[i].sh_addr);
             break;
         }
     }
@@ -154,7 +169,20 @@ void *MapLibrary(const char *libpath)
 
     fill_info(lib);
     setup_hash(lib);
-
-
+    size_t num_deps = 0;
+    for (Elf64_Dyn *dyn = lib->dyn; dyn->d_tag != DT_NULL; ++dyn) {
+        if (dyn->d_tag != DT_NEEDED)
+            continue;
+        num_deps++;
+    }
+    lib->deps = malloc(num_deps * sizeof(LinkMap *));
+    for (Elf64_Dyn *dyn = lib->dyn; dyn->d_tag != DT_NULL; ++dyn) {
+        if (dyn->d_tag != DT_NEEDED)
+            continue;
+        const char *sym_str = (const char *)(lib->dynInfo[DT_STRTAB]->d_un.d_ptr);
+        const char *libname = sym_str + dyn->d_un.d_ptr;
+        LinkMap *dep = MapLibrary(libname);
+        lib->deps[lib->num_deps++] = dep;
+    }
     return lib;
 }

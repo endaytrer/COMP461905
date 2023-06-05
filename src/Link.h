@@ -50,6 +50,9 @@ typedef struct linkMap
 
     /* Do not modify anything above */
     /* Your code here */
+
+    int num_deps;
+    struct linkMap **deps;
 } LinkMap;
 
 #endif /* Link.h */

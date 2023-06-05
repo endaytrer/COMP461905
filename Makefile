@@ -17,7 +17,7 @@ LOADER-SAMPLE-SRC += util/shim.c
 # Thanks to Ubuntu Wiki, I know that control flow protection was introduced since 19.04
 # But I can't tell the accurate gcc version for it is even OS-dependent
 # At the end of day I decide to keep things broken and enable it only on 20.04  
-CFLAGS = -g -shared -fPIC
+CFLAGS = -g -shared -fPIC -O0
 GCCVERSIONGTEQ9 := $(shell expr `gcc -dumpversion | cut -f1 -d.` \>= 9)
 ifeq "$(GCCVERSIONGTEQ9)" "1"
 	CFLAGS += -fcf-protection=none
