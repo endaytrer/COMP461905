@@ -109,6 +109,7 @@ void *MapLibrary(const char *libpath)
             if (strcmp(libpath, buf) == 0) {
                 lib->name = libpath;
                 lib->fake = 1;
+                lib->num_deps = 0;
                 return lib;
             }
         }

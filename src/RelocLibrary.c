@@ -70,7 +70,17 @@ void *symbolLookup(LinkMap *dep, const char *name)
     return NULL; //not this dependency
 }
 
-
+void *search_symbol(LinkMap *node, const char *name) {
+    if (node == NULL) return NULL;
+    void *symbol_addr;
+    if ((symbol_addr = symbolLookup(node, name)) != NULL)
+        return symbol_addr;
+    for (int i = 0; i < node->num_deps; i++) {
+        if ((symbol_addr = search_symbol(node->deps[i], name)) != NULL)
+            return symbol_addr;
+    }
+    return NULL;
+}
 
 void reloc_jmprel(LinkMap *lib,  Elf64_Rela *rela, Elf64_Sym *symbol_table, const char *string_table) {
     
@@ -81,11 +91,7 @@ void reloc_jmprel(LinkMap *lib,  Elf64_Rela *rela, Elf64_Sym *symbol_table, cons
         uint64_t reloc_type = rela[i].r_info & 0xffffffff;
         Elf64_Sym symbol = symbol_table[symbol_index];
         const char *sym_str = string_table + symbol.st_name;
-        void *fixed_address = symbolLookup(lib, sym_str);
-        for (int i = 0; i < lib->num_deps; i++) {
-            if (fixed_address != NULL) break;
-            fixed_address = symbolLookup(lib->deps[i], sym_str);
-        }
+        void *fixed_address = search_symbol(lib, sym_str);
         *addr = (uint64_t)fixed_address + rela[i].r_addend;
         // *addr += jmp_entries[i].r_addend;
     }
@@ -101,7 +107,9 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
             size_t symbol_index = rela[i].r_info >> 32;
             Elf64_Sym symbol = symbol_table[symbol_index];
             const char *sym_str = string_table + symbol.st_name;
+            // void *fixed_address = search_symbol(lib, sym_str);
             void *fixed_address = symbolLookup(lib, sym_str);
+
             *addr = (uint64_t)fixed_address + rela[i].r_addend;
         } else {
             *addr = lib->addr + rela[i].r_addend;
@@ -111,9 +119,12 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
 
 void RelocLibrary(LinkMap *lib, int mode)
 {
+    if (lib->fake) return;
     Elf64_Sym *symbol_table = (Elf64_Sym *)lib->dynInfo[DT_SYMTAB]->d_un.d_ptr;
     const char *string_table = (const char *)lib->dynInfo[DT_STRTAB]->d_un.d_ptr;
     if (lib->dynInfo[DT_JMPREL]) reloc_jmprel(lib, (Elf64_Rela *)lib->dynInfo[DT_JMPREL]->d_un.d_ptr, symbol_table, string_table);
     if (lib->dynInfo[DT_RELA]) reloc_rela(lib, (Elf64_Rela *)lib->dynInfo[DT_RELA]->d_un.d_ptr, symbol_table, string_table);
-
+    for (int i = 0; i < lib->num_deps; i++) {
+        RelocLibrary(lib->deps[i], mode);
+    }
 }
