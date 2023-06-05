@@ -16,6 +16,7 @@
 static const char *sys_path[] = {
     "/usr/lib/x86_64-linux-gnu/",
     "/lib/x86_64-linux-gnu/",
+    "test_lib/",
     ""
 };
 
@@ -99,7 +100,6 @@ void *MapLibrary(const char *libpath)
     */
     
     LinkMap *lib = malloc(sizeof(LinkMap));
-
     for (int i = 0; i < sizeof(sys_path) / sizeof(const char *); i++) {
         for (int j = 0; j < sizeof(fake_so) / sizeof(const char *); j++) {
             char buf[42];
@@ -113,10 +113,21 @@ void *MapLibrary(const char *libpath)
             }
         }
     }
-
+    lib->fake = 0;
     int fd;
-    if ((fd = open(libpath, O_RDWR)) < 0)
+    // find in path
+    int len = 27 + strlen(libpath) + 1;
+    char *buf = malloc(len);
+    for (int i = 0; i < sizeof(sys_path) / sizeof(const char *); i++) {
+        memset(buf, 0, len);
+        strcpy(buf, sys_path[i]);
+        strcat(buf, libpath);
+        if ((fd = open(buf, O_RDWR)) >= 0) 
+            break;
+    }
+    if (fd < 0) {
         return NULL;
+    }
 
     Elf64_Ehdr elf_header;
     read(fd, &elf_header, sizeof(Elf64_Ehdr));
@@ -170,11 +181,13 @@ void *MapLibrary(const char *libpath)
     fill_info(lib);
     setup_hash(lib);
     size_t num_deps = 0;
+    lib->num_deps = 0;
     for (Elf64_Dyn *dyn = lib->dyn; dyn->d_tag != DT_NULL; ++dyn) {
         if (dyn->d_tag != DT_NEEDED)
             continue;
         num_deps++;
     }
+    if (num_deps == 0) return lib;
     lib->deps = malloc(num_deps * sizeof(LinkMap *));
     for (Elf64_Dyn *dyn = lib->dyn; dyn->d_tag != DT_NULL; ++dyn) {
         if (dyn->d_tag != DT_NEEDED)
