@@ -7,6 +7,9 @@
 #include <string.h>
 
 #include "Link.h"
+#include "Loader.h"
+
+extern void trampoline();
 
 // glibc version to hash a symbol
 static uint_fast32_t
@@ -82,6 +85,17 @@ void *search_symbol(LinkMap *node, const char *name) {
     return NULL;
 }
 
+void reloc_jmprel_lazy(LinkMap *lib,  Elf64_Rela *rela) {
+    
+    size_t reloc_size = lib->dynInfo[DT_PLTRELSZ]->d_un.d_val / sizeof(Elf64_Rela);
+    uint64_t *got = (uint64_t *)lib->dynInfo[DT_PLTGOT]->d_un.d_ptr;
+    got[1] = (uint64_t)lib;
+    got[2] = (uint64_t)trampoline;
+    for (int i = 0; i < reloc_size; i++) {
+        uint64_t *addr = (uint64_t *)(lib->addr + rela[i].r_offset);
+        *addr += lib->addr;
+    }
+}
 void reloc_jmprel(LinkMap *lib,  Elf64_Rela *rela, Elf64_Sym *symbol_table, const char *string_table) {
     
     size_t reloc_size = lib->dynInfo[DT_PLTRELSZ]->d_un.d_val / sizeof(Elf64_Rela);
@@ -93,7 +107,6 @@ void reloc_jmprel(LinkMap *lib,  Elf64_Rela *rela, Elf64_Sym *symbol_table, cons
         const char *sym_str = string_table + symbol.st_name;
         void *fixed_address = search_symbol(lib, sym_str);
         *addr = (uint64_t)fixed_address + rela[i].r_addend;
-        // *addr += jmp_entries[i].r_addend;
     }
 }
 
@@ -122,7 +135,13 @@ void RelocLibrary(LinkMap *lib, int mode)
     if (lib->fake) return;
     Elf64_Sym *symbol_table = (Elf64_Sym *)lib->dynInfo[DT_SYMTAB]->d_un.d_ptr;
     const char *string_table = (const char *)lib->dynInfo[DT_STRTAB]->d_un.d_ptr;
-    if (lib->dynInfo[DT_JMPREL]) reloc_jmprel(lib, (Elf64_Rela *)lib->dynInfo[DT_JMPREL]->d_un.d_ptr, symbol_table, string_table);
+    
+    if (lib->dynInfo[DT_JMPREL]) {
+        if (mode == BIND_NOW)
+            reloc_jmprel(lib, (Elf64_Rela *)lib->dynInfo[DT_JMPREL]->d_un.d_ptr, symbol_table, string_table);
+        else
+            reloc_jmprel_lazy(lib, (Elf64_Rela *)lib->dynInfo[DT_JMPREL]->d_un.d_ptr);
+    }
     if (lib->dynInfo[DT_RELA]) reloc_rela(lib, (Elf64_Rela *)lib->dynInfo[DT_RELA]->d_un.d_ptr, symbol_table, string_table);
     for (int i = 0; i < lib->num_deps; i++) {
         RelocLibrary(lib->deps[i], mode);

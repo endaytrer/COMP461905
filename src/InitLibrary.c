@@ -23,6 +23,4 @@ void InitLibrary(LinkMap *l)
             initv[i]();
         }
     }
-
-    /* Your code here */
 }
