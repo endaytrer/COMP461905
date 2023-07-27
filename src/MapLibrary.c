@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdint.h>
 #include <elf.h>
@@ -13,23 +14,16 @@
 #define ALIGN_DOWN(base, size) ((base) & -((__typeof__(base))(size)))
 #define ALIGN_UP(base, size) ALIGN_DOWN((base) + (size)-1, (size))
 #define ALIGNED_SIZE(base, size) (ALIGN_UP(base + size, getpagesize()) - ALIGN_DOWN(base, getpagesize()))
-static const char *sys_path[] = {
-    "/usr/lib/x86_64-linux-gnu/",
-    "/lib/x86_64-linux-gnu/",
-    "test_lib/",
-    ""
-};
+extern char *sys_path[64];
 
 static const char *fake_so[] = {
     "libc.so.6",
     "ld-linux.so.2",
-    ""
+    NULL,
 };
 
 static void setup_hash(LinkMap *l)
 {
-    uint32_t *hash;
-
     /* borrowed from dl-lookup.c:_dl_setup_hash */
     Elf32_Word *hash32 = (Elf32_Word *)l->dynInfo[DT_GNU_HASH]->d_un.d_ptr;
     l->l_nbuckets = *hash32++;
@@ -100,28 +94,24 @@ void *MapLibrary(const char *libpath)
     */
     
     LinkMap *lib = malloc(sizeof(LinkMap));
-    for (int i = 0; i < sizeof(sys_path) / sizeof(const char *); i++) {
-        for (int j = 0; j < sizeof(fake_so) / sizeof(const char *); j++) {
-            char buf[42];
-            memset(buf, 0, sizeof(buf));
-            strcpy(buf, sys_path[i]);
-            strcat(buf, fake_so[j]);
-            if (strcmp(libpath, buf) == 0) {
-                lib->name = libpath;
-                lib->fake = 1;
-                lib->num_deps = 0;
-                return lib;
-            }
+    for (int j = 0; fake_so[j] != NULL; j++) {
+        if (strcmp(libpath, fake_so[j]) == 0) {
+            lib->name = libpath;
+            lib->fake = 1;
+            lib->num_deps = 0;
+            return lib;
         }
     }
     lib->fake = 0;
-    int fd;
+    int fd = -1;
     // find in path
     int len = 27 + strlen(libpath) + 1;
     char *buf = malloc(len);
-    for (int i = 0; i < sizeof(sys_path) / sizeof(const char *); i++) {
+    for (int i = 0; sys_path[i] != NULL; i++) {
         memset(buf, 0, len);
         strcpy(buf, sys_path[i]);
+        if (strlen(buf) != 0)
+            strcat(buf, "/");
         strcat(buf, libpath);
         if ((fd = open(buf, O_RDWR)) >= 0) 
             break;
