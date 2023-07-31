@@ -1,41 +1,33 @@
 # PLT trampoline for lazy binding
-    .text
-    .globl trampoline
-    .hidden trampoline
-    .type trampoline, @function
-    .align 16
+.text
+.globl trampoline
+.extern runtimeResolve
 
 trampoline:
-
+    
 # Your code here
-    push %rbp
-    mov %rsp, %rbp
+    stp fp, lr, [sp, #-16]!
+    mov fp, sp
 
 
     # save calling parameters
-    push %rdi
-    push %rsi
-    push %rdx
-    push %rcx
-    push %r8
-    push %r9
+    stp x0, x1, [sp, #-16]!
+    stp x2, x3, [sp, #-16]!
+    stp x4, x5, [sp, #-16]!
+    stp x6, x7, [sp, #-16]!
 
-    mov 8(%rbp), %rdi
-    mov 16(%rbp), %rsi
+    ldr x0, [x16, #-8]
+    ldr x1, [fp, #16]
+    sub x1, x1, x16
+    lsr x1, x1, #4
 
-    call runtimeResolve
+    bl runtimeResolve
+    mov x9, x0
 
-    # restore calling parameters
-    pop %r9
-    pop %r8
-    pop %rcx
-    pop %rdx
-    pop %rsi
-    pop %rdi
-    # restore to original context.
-    leave
-    # remove lib address and reloc symbol from stack.
-    
-    add $16, %rsp
-    # since ip is already pushed on stack, just jump to it.
-    jmp *%rax
+    ldp x6, x7, [sp], #16
+    ldp x4, x5, [sp], #16
+    ldp x2, x3, [sp], #16
+    ldp x0, x1, [sp], #16
+    ldp fp, lr, [sp], #16
+    ldp x16, lr, [sp], #16
+    br x9

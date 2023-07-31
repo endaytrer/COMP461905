@@ -115,8 +115,12 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
 
     for (int i = 0; i < reloc_size; i++) {
         uint64_t *addr = (uint64_t *)(lib->addr + rela[i].r_offset);
-        uint64_t reloc_type = rela[i].r_info & 0xffffffff;
-        if (reloc_type == 6) {
+        uint64_t reloc_type = ELF64_R_TYPE(rela[i].r_info);
+#if defined(__aarch64__) || defined(_M_ARM64)
+        if (reloc_type == R_AARCH64_GLOB_DAT) {
+#else
+        if (reloc_type == R_X86_64_GLOB_DAT) {
+#endif
             size_t symbol_index = rela[i].r_info >> 32;
             Elf64_Sym symbol = symbol_table[symbol_index];
             const char *sym_str = string_table + symbol.st_name;
