@@ -1,6 +1,8 @@
 # PLT trampoline for lazy binding
 .text
 .globl trampoline
+.hidden trampoline
+.type trampoline, @function
 .extern runtimeResolve
 
 trampoline:
@@ -19,7 +21,8 @@ trampoline:
     ldr x0, [x16, #-8]
     ldr x1, [fp, #16]
     sub x1, x1, x16
-    lsr x1, x1, #4
+    lsr x1, x1, #3
+    sub x1, x1, #1
 
     bl runtimeResolve
     mov x9, x0
@@ -31,3 +34,4 @@ trampoline:
     ldp fp, lr, [sp], #16
     ldp x16, lr, [sp], #16
     br x9
+
