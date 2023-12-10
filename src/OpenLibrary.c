@@ -16,13 +16,14 @@ char *sys_path[64] = {
     ""
 };
 
+int envlen = 7;
+
 __attribute__((constructor))
 static void init() {
     char ld_library_path[1024];
     const char *env = getenv("LD_LIBRARY_PATH");
     if (!env) return;
     strcpy(ld_library_path, env);
-    int envlen = 7;
     char *ptr = ld_library_path;
     while (true) {
         char *tok = strtok(ptr, ":");

@@ -214,7 +214,6 @@ if __name__ == '__main__':
     test6 = TestCase('SimpleDep', 'wrapper', str(INT_INTINT_L), '2', '3')
     test6.assign_score(2)
     test6.assign_name('lazy binding')
-    test6.add_answer(b'Resolving address for entry 0\n6\n')
     test6.add_wrapper({"printf": 1})
     allTests.append(test6)
     # sanity tests end

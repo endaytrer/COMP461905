@@ -5,7 +5,7 @@
 #include <elf.h>
 #include <link.h>
 #include <string.h>
-
+#include <assert.h>
 #include "Link.h"
 #include "Loader.h"
 #define HIJACK(function) \
@@ -98,7 +98,7 @@ void reloc_jmprel_lazy(LinkMap *lib,  Elf64_Rela *rela) {
     got[2] = (uint64_t)trampoline;
     for (int i = 0; i < reloc_size; i++) {
         uint64_t *addr = (uint64_t *)(lib->addr + rela[i].r_offset);
-        *addr += lib->addr;
+        *addr += lib->addr + rela[i].r_addend;
     }
 }
 void reloc_jmprel(LinkMap *lib,  Elf64_Rela *rela, Elf64_Sym *symbol_table, const char *string_table) {
@@ -131,9 +131,40 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
             void *fixed_address = search_symbol(lib, sym_str);
             // void *fixed_address = symbolLookup(lib, sym_str);
 
-            *addr = (uint64_t)fixed_address + rela[i].r_addend;
-        } else {
+            *addr = (uint64_t)fixed_address;
+        } else if (reloc_type == R_X86_64_RELATIVE) {
             *addr = lib->addr + rela[i].r_addend;
+        } else if (reloc_type == R_X86_64_64) {
+            size_t symbol_index = rela[i].r_info >> 32;
+            Elf64_Sym symbol = symbol_table[symbol_index];
+            const char *sym_str = string_table + symbol.st_name;
+            void *fixed_address = search_symbol(lib, sym_str);
+            // void *fixed_address = symbolLookup(lib, sym_str);
+
+            *addr = (uint64_t)fixed_address + rela[i].r_addend;
+        } else if (reloc_type == R_X86_64_COPY) {
+
+            // Here I just malloc for every entry
+            // TODO: use dedicated data structure for this.
+
+            size_t symbol_index = rela[i].r_info >> 32;
+            Elf64_Sym symbol = symbol_table[symbol_index];
+            const char *sym_str = string_table + symbol.st_name;
+            void *fixed_address = search_symbol(lib, sym_str);
+            void *new_symbol = malloc(symbol.st_size);
+            memcpy(new_symbol, fixed_address, symbol.st_size);
+            *addr = (uint64_t)new_symbol;
+        } else {
+
+            // Here I just malloc for every entry
+            // TODO: use thread local storage.
+
+            printf("%s, unexpected reloc type = %d\n", lib->name, reloc_type);
+
+            size_t symbol_index = rela[i].r_info >> 32;
+            Elf64_Sym symbol = symbol_table[symbol_index];
+            // void *new_symbol = malloc(symbol.st_size);
+            *addr = 0x1919810;
         }
     }
 }

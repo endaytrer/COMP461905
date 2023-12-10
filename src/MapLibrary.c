@@ -7,6 +7,7 @@
 #include <unistd.h> //for getpagesize
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <assert.h>
 
 #define MAP_ANONYMOUS 0x20
 
@@ -20,7 +21,7 @@ extern char *sys_path[64];
 
 static const char *fake_so[] = {
     "libc.so.6",
-    "ld-linux.so.2",
+    "ld-linux-x86-64.so.2",
     NULL,
 };
 
@@ -125,7 +126,7 @@ void *MapLibrary(const char *libpath)
 
     Elf64_Ehdr elf_header;
     read(fd, &elf_header, sizeof(Elf64_Ehdr));
-    
+
     // Read programs
     Elf64_Phdr *program_headers = malloc(elf_header.e_phnum * sizeof(Elf64_Phdr));
     lseek(fd, elf_header.e_phoff, SEEK_SET);
@@ -137,7 +138,11 @@ void *MapLibrary(const char *libpath)
             total_size = total_size > offset_size ? total_size : offset_size;
         }
     }
-    bool initialized = false;
+
+    void *lib_block = mmap(NULL, total_size, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    memset(lib_block, 0, total_size);
+    lib->addr = (uint64_t)lib_block;
+
     for (int i = 0; i < elf_header.e_phnum; i++) {
         if (program_headers[i].p_type != PT_LOAD) continue;
         int prot = 0;
@@ -146,22 +151,23 @@ void *MapLibrary(const char *libpath)
         prot |= (program_headers[i].p_flags & PF_X)? PROT_EXEC : 0;
         size_t pagesize = getpagesize();
         off_t offset_aligned = ALIGN_DOWN(program_headers[i].p_offset, pagesize);
-        size_t size_to_map = ALIGN_UP(program_headers[i].p_filesz + (program_headers[i].p_offset - offset_aligned), pagesize);
-        // size_t aligned_size = ALIGNED_SIZE(program_headers[i].p_vaddr, program_headers[i].p_memsz);
-        if (!initialized) {
-            initialized = true;
-            void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
-            void *lib_block = mmap(NULL, total_size, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-            lib->addr = (uint64_t)lib_block;
-            memcpy(lib_block, file_block, size_to_map);
-            mprotect(lib_block, size_to_map, prot);
-            munmap(file_block, size_to_map);
-            continue;
-        }
-        void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
-        void *lib_block = mmap((void *)(lib->addr + ALIGN_DOWN(program_headers[i].p_vaddr, getpagesize())), size_to_map, PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
-        memcpy(lib_block, file_block, size_to_map);
-        mprotect(lib_block, size_to_map, prot);
+        size_t size_to_map = ALIGN_UP(program_headers[i].p_filesz + program_headers[i].p_offset, pagesize) - offset_aligned;
+
+        void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, offset_aligned);
+        memcpy(
+            (void *)(lib->addr + program_headers[i].p_vaddr),
+            (void *)((uint64_t)file_block + program_headers[i].p_offset - offset_aligned),
+            program_headers[i].p_filesz
+        );
+
+        off_t vaddr_aligned = ALIGN_DOWN(program_headers[i].p_vaddr, pagesize);
+        size_t size_to_protect = ALIGN_UP(program_headers[i].p_memsz + program_headers[i].p_vaddr, pagesize) - vaddr_aligned;
+        mprotect(
+            (void *)(lib->addr + vaddr_aligned),
+            size_to_protect,
+            prot
+        );
+
         munmap(file_block, size_to_map);
     }
     free(program_headers);
