@@ -1,3 +1,4 @@
+.section .note.GNU-stack,"",@progbits
 # PLT trampoline for lazy binding
     .text
     .globl trampoline
@@ -35,7 +36,6 @@ trampoline:
     # restore to original context.
     leave
     # remove lib address and reloc symbol from stack.
-    
     add $16, %rsp
     # since ip is already pushed on stack, just jump to it.
     jmp *%rax

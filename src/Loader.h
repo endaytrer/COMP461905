@@ -13,4 +13,6 @@ extern void *OpenLibrary(const char *name, int mode);
 // counterpart of dlsym
 extern void *FindSymbol(void *lib, const char *symname);
 
+extern void FreeLibrary(void *lib);
+
 #endif /* Loader.h */

@@ -7,19 +7,22 @@
 #include "LoaderInternal.h"
 
 char *sys_path[64] = {
+    "test_lib",
     "/lib",
     "/usr/lib",
-    "test_lib",
+    "/usr/local/lib",
+    "/lib/aarch64-linux-gnu",
+    "/lib/x86_64-linux-gnu",
     ""
 };
 
 __attribute__((constructor))
 static void init() {
-    char ld_library_path[128];
+    char ld_library_path[1024];
     const char *env = getenv("LD_LIBRARY_PATH");
-    if (env == NULL) return;
-    strncpy(ld_library_path, env, 128);
-    int envlen = 4;
+    if (!env) return;
+    strcpy(ld_library_path, env);
+    int envlen = 7;
     char *ptr = ld_library_path;
     while (true) {
         char *tok = strtok(ptr, ":");
@@ -38,6 +41,8 @@ static void init() {
 void *OpenLibrary(const char *libpath, int mode)
 {
     LinkMap *new = MapLibrary(libpath);
+    
+    if (!new) return NULL;
 
     RelocLibrary(new, mode);
 

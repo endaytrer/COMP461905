@@ -8,6 +8,8 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
+#define MAP_ANONYMOUS 0x20
+
 #include "Link.h"
 #include "LoaderInternal.h"
 
@@ -94,9 +96,9 @@ void *MapLibrary(const char *libpath)
     */
     
     LinkMap *lib = malloc(sizeof(LinkMap));
+    lib->name = libpath;
     for (int j = 0; fake_so[j] != NULL; j++) {
         if (strcmp(libpath, fake_so[j]) == 0) {
-            lib->name = libpath;
             lib->fake = 1;
             lib->num_deps = 0;
             return lib;
@@ -105,17 +107,18 @@ void *MapLibrary(const char *libpath)
     lib->fake = 0;
     int fd = -1;
     // find in path
-    int len = 27 + strlen(libpath) + 1;
-    char *buf = malloc(len);
+    const int char_size = 1024;
+    char *buf = malloc(char_size);
     for (int i = 0; sys_path[i] != NULL; i++) {
-        memset(buf, 0, len);
+        memset(buf, 0, char_size);
         strcpy(buf, sys_path[i]);
         if (strlen(buf) != 0)
             strcat(buf, "/");
         strcat(buf, libpath);
-        if ((fd = open(buf, O_RDWR)) >= 0) 
+        if ((fd = open(buf, O_RDONLY)) >= 0)
             break;
     }
+    free(buf);
     if (fd < 0) {
         return NULL;
     }
@@ -127,32 +130,39 @@ void *MapLibrary(const char *libpath)
     Elf64_Phdr *program_headers = malloc(elf_header.e_phnum * sizeof(Elf64_Phdr));
     lseek(fd, elf_header.e_phoff, SEEK_SET);
     read(fd, program_headers, elf_header.e_phnum * sizeof(Elf64_Phdr));
-    uint8_t *back;
     size_t total_size = 0;
     for (int i = 0; i < elf_header.e_phnum; i++) {
-        if (program_headers[i].p_type == PT_LOAD)
-            total_size += ALIGNED_SIZE(program_headers[i].p_offset, program_headers[i].p_memsz);
+        if (program_headers[i].p_type == PT_LOAD) {
+            size_t offset_size = ALIGN_UP(program_headers[i].p_vaddr + program_headers[i].p_memsz, getpagesize());
+            total_size = total_size > offset_size ? total_size : offset_size;
+        }
     }
-    int64_t zero_offset;
+    bool initialized = false;
     for (int i = 0; i < elf_header.e_phnum; i++) {
         if (program_headers[i].p_type != PT_LOAD) continue;
-
         int prot = 0;
         prot |= (program_headers[i].p_flags & PF_R)? PROT_READ : 0;
         prot |= (program_headers[i].p_flags & PF_W)? PROT_WRITE : 0;
         prot |= (program_headers[i].p_flags & PF_X)? PROT_EXEC : 0;
-        size_t aligned_size = ALIGNED_SIZE(program_headers[i].p_offset, program_headers[i].p_memsz);
-
-        if (i == 0) {
-            zero_offset = -ALIGN_DOWN(program_headers[i].p_offset, getpagesize());
-            lib->addr = (uint64_t)mmap(NULL, total_size, prot, MAP_PRIVATE, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
-            back = (void *)(lib->addr + aligned_size);
-            lib->addr += zero_offset;
+        size_t pagesize = getpagesize();
+        off_t offset_aligned = ALIGN_DOWN(program_headers[i].p_offset, pagesize);
+        size_t size_to_map = ALIGN_UP(program_headers[i].p_filesz + (program_headers[i].p_offset - offset_aligned), pagesize);
+        // size_t aligned_size = ALIGNED_SIZE(program_headers[i].p_vaddr, program_headers[i].p_memsz);
+        if (!initialized) {
+            initialized = true;
+            void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
+            void *lib_block = mmap(NULL, total_size, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            lib->addr = (uint64_t)lib_block;
+            memcpy(lib_block, file_block, size_to_map);
+            mprotect(lib_block, size_to_map, prot);
+            munmap(file_block, size_to_map);
             continue;
         }
-        back = mmap(back, aligned_size, prot, MAP_PRIVATE | MAP_FIXED, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
-
-        back = (void *)((uint64_t)back + aligned_size);
+        void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, ALIGN_DOWN(program_headers[i].p_offset, getpagesize()));
+        void *lib_block = mmap((void *)(lib->addr + ALIGN_DOWN(program_headers[i].p_vaddr, getpagesize())), size_to_map, PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
+        memcpy(lib_block, file_block, size_to_map);
+        mprotect(lib_block, size_to_map, prot);
+        munmap(file_block, size_to_map);
     }
     free(program_headers);
     // Read sections
@@ -189,4 +199,18 @@ void *MapLibrary(const char *libpath)
         lib->deps[lib->num_deps++] = dep;
     }
     return lib;
+}
+
+
+void FreeLibrary(void *lib) {
+    LinkMap *map = (LinkMap *)lib;
+
+    if (!map->fake) {
+
+        for (int i = 0; i < map->num_deps; i++) {
+            FreeLibrary(map->deps[i]);
+        }
+        free(map->deps);
+    }
+    free(map);
 }

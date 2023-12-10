@@ -8,6 +8,12 @@
 
 #include "Link.h"
 #include "Loader.h"
+#define HIJACK(function) \
+do { \
+    if (strcmp(name, #function) == 0) { \
+        return v_ ## function; \
+    } \
+} while (0)
 
 extern void trampoline();
 
@@ -40,7 +46,6 @@ void *symbolLookup(LinkMap *dep, const char *name)
     const char *strtab = (const char *)dep->dynInfo[DT_STRTAB]->d_un.d_ptr;
 
     uint_fast32_t new_hash = dl_new_hash(name);
-    Elf64_Sym *sym;
     const Elf64_Addr *bitmask = dep->l_gnu_bitmask;
     uint32_t symidx;
     Elf64_Addr bitmask_word = bitmask[(new_hash / __ELF_NATIVE_CLASS) & dep->l_gnu_bitmask_idxbits];
@@ -102,7 +107,6 @@ void reloc_jmprel(LinkMap *lib,  Elf64_Rela *rela, Elf64_Sym *symbol_table, cons
     for (int i = 0; i < reloc_size; i++) {
         uint64_t *addr = (uint64_t *)(lib->addr + rela[i].r_offset);
         size_t symbol_index = rela[i].r_info >> 32;
-        uint64_t reloc_type = rela[i].r_info & 0xffffffff;
         Elf64_Sym symbol = symbol_table[symbol_index];
         const char *sym_str = string_table + symbol.st_name;
         void *fixed_address = search_symbol(lib, sym_str);
@@ -115,13 +119,17 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
 
     for (int i = 0; i < reloc_size; i++) {
         uint64_t *addr = (uint64_t *)(lib->addr + rela[i].r_offset);
-        uint64_t reloc_type = rela[i].r_info & 0xffffffff;
-        if (reloc_type == 6) {
+        uint64_t reloc_type = ELF64_R_TYPE(rela[i].r_info);
+#if defined(__aarch64__) || defined(_M_ARM64)
+        if (reloc_type == R_AARCH64_GLOB_DAT) {
+#else
+        if (reloc_type == R_X86_64_GLOB_DAT) {
+#endif
             size_t symbol_index = rela[i].r_info >> 32;
             Elf64_Sym symbol = symbol_table[symbol_index];
             const char *sym_str = string_table + symbol.st_name;
-            // void *fixed_address = search_symbol(lib, sym_str);
-            void *fixed_address = symbolLookup(lib, sym_str);
+            void *fixed_address = search_symbol(lib, sym_str);
+            // void *fixed_address = symbolLookup(lib, sym_str);
 
             *addr = (uint64_t)fixed_address + rela[i].r_addend;
         } else {
