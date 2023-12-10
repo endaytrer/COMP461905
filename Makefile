@@ -9,9 +9,6 @@ TST-LIBS          = $(addprefix test_lib/,lib1.so SimpleMul.so SimpleIni.so Simp
 
 USE-CUSTOM-LDR ?= F
 
-LOADER-SRC += util/shim.c
-
-LOADER-SAMPLE-SRC += util/shim.c
 
 # https://wiki.ubuntu.com/ToolChain/CompilerFlags
 # Thanks to Ubuntu Wiki, I know that control flow protection was introduced since 19.04
@@ -100,6 +97,3 @@ clean:
 
 cleanlib:
 	rm -f test_lib/*.so
-
-submit:
-	zip -r $(shell whoami | cut -d- -f1 | sed -e 's/[0-9]*/&-lab5.zip/') src/

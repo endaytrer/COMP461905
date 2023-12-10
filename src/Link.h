@@ -11,8 +11,6 @@
 #include <stdint.h>
 #include <elf.h>
 
-#include "../util/shim.h"
-
 /* Prevent unreadable *_NEW, instead we redefine it to fit in array */
 #define OS_SPECIFIC_FLAG 2
 #define DT_RELACOUNT_ 0x6ffffff9

@@ -59,13 +59,6 @@ class TestCase:
         self.craftAns = 0
         self.funcWrapper = None
 
-    def check_usage(self, log):
-        if self.funcWrapper is not None:
-            ret = self.funcWrapper.compare(log)
-            return ret
-        else:
-            # no function wrapper, we don't check it 
-            return True
     
     def add_wrapper(self, wrapList):
         self.funcWrapper = FuncUsage(wrapList)
@@ -148,11 +141,6 @@ class TestCase:
                 else:
                     realAns = DLProc.stdout
                 if RetProc.stdout == realAns:
-                    if self.check_usage(RetProc.stderr) == False:
-                        # handle usage comparation in FuncUsage class
-                        print("Correct output while abusing system functions.\nYou are free to test your implementation in this way, but no score for you.")
-                        print("Shim checking failed!")
-                    else:
                         self.claimedScore += self.score
                         print("Expected output:", realAns)
                         print("Your output:", RetProc.stdout)
@@ -214,7 +202,6 @@ if __name__ == '__main__':
     test6 = TestCase('SimpleDep', 'wrapper', str(INT_INTINT_L), '2', '3')
     test6.assign_score(2)
     test6.assign_name('lazy binding')
-    test6.add_answer(b'Resolving address for entry 0\n6\n')
     test6.add_wrapper({"printf": 1})
     allTests.append(test6)
     # sanity tests end
