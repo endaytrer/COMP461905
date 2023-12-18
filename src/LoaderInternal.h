@@ -6,7 +6,7 @@
 
 #include "Link.h"
 
-void *MapLibrary(const char *name);
+LinkMap *MapLibrary(const char *name);
 void RelocLibrary(LinkMap *l, int mode);
 void InitLibrary(LinkMap *l);
 void *symbolLookup(LinkMap *dep, const char *name);

@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <dlfcn.h>
 
 #define MAP_ANONYMOUS 0x20
 
@@ -76,7 +77,9 @@ static void fill_info(LinkMap *lib)
     rebase(DT_INIT_ARRAY);
 }
 
-void *MapLibrary(const char *libpath)
+static uint64_t num_tls_maps = 0;
+
+LinkMap *MapLibrary(const char *libpath)
 {
     /*
      * hint:
@@ -102,6 +105,7 @@ void *MapLibrary(const char *libpath)
         if (strcmp(libpath, fake_so[j]) == 0) {
             lib->fake = 1;
             lib->num_deps = 0;
+            lib->fakeHandle = NULL;
             return lib;
         }
     }
@@ -132,45 +136,93 @@ void *MapLibrary(const char *libpath)
     lseek(fd, elf_header.e_phoff, SEEK_SET);
     read(fd, program_headers, elf_header.e_phnum * sizeof(Elf64_Phdr));
     size_t total_size = 0;
+
+    // First pass of program headers
+    // Need to figure out the memory size of the library
     for (int i = 0; i < elf_header.e_phnum; i++) {
         if (program_headers[i].p_type == PT_LOAD) {
             size_t offset_size = ALIGN_UP(program_headers[i].p_vaddr + program_headers[i].p_memsz, getpagesize());
             total_size = total_size > offset_size ? total_size : offset_size;
         }
     }
-
+    // Second pass of program headers
+    // Map the data, and get RWX Permission of each page.
     void *lib_block = mmap(NULL, total_size, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     memset(lib_block, 0, total_size);
     lib->addr = (uint64_t)lib_block;
+    lib->size = total_size;
+    lib->use_tls = false;
+    size_t pagesize = getpagesize();
+    size_t total_pages = total_size / pagesize;
+    uint8_t *page_permissions = malloc(total_pages);
+    memset(page_permissions, 0, total_pages);
 
     for (int i = 0; i < elf_header.e_phnum; i++) {
-        if (program_headers[i].p_type != PT_LOAD) continue;
-        int prot = 0;
-        prot |= (program_headers[i].p_flags & PF_R)? PROT_READ : 0;
-        prot |= (program_headers[i].p_flags & PF_W)? PROT_WRITE : 0;
-        prot |= (program_headers[i].p_flags & PF_X)? PROT_EXEC : 0;
-        size_t pagesize = getpagesize();
-        off_t offset_aligned = ALIGN_DOWN(program_headers[i].p_offset, pagesize);
-        size_t size_to_map = ALIGN_UP(program_headers[i].p_filesz + program_headers[i].p_offset, pagesize) - offset_aligned;
+        switch (program_headers[i].p_type) {
+            case PT_LOAD:
+                int prot = 0;
+                prot |= (program_headers[i].p_flags & PF_R)? PROT_READ : 0;
+                prot |= (program_headers[i].p_flags & PF_W)? PROT_WRITE : 0;
+                prot |= (program_headers[i].p_flags & PF_X)? PROT_EXEC : 0;
 
-        void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, offset_aligned);
-        memcpy(
-            (void *)(lib->addr + program_headers[i].p_vaddr),
-            (void *)((uint64_t)file_block + program_headers[i].p_offset - offset_aligned),
-            program_headers[i].p_filesz
-        );
+                off_t offset_aligned = ALIGN_DOWN(program_headers[i].p_offset, pagesize);
+                size_t size_to_map = ALIGN_UP(program_headers[i].p_filesz + program_headers[i].p_offset, pagesize) - offset_aligned;
 
-        off_t vaddr_aligned = ALIGN_DOWN(program_headers[i].p_vaddr, pagesize);
-        size_t size_to_protect = ALIGN_UP(program_headers[i].p_memsz + program_headers[i].p_vaddr, pagesize) - vaddr_aligned;
-        mprotect(
-            (void *)(lib->addr + vaddr_aligned),
-            size_to_protect,
-            prot
-        );
+                void *file_block = mmap(NULL, size_to_map, PROT_READ, MAP_PRIVATE, fd, offset_aligned);
+                memcpy(
+                    (void *)(lib->addr + program_headers[i].p_vaddr),
+                    (void *)((uint64_t)file_block + program_headers[i].p_offset - offset_aligned),
+                    program_headers[i].p_filesz
+                );
 
-        munmap(file_block, size_to_map);
+                off_t vaddr_aligned = ALIGN_DOWN(program_headers[i].p_vaddr, pagesize) / pagesize;
+                size_t size_to_protect = ALIGN_UP(program_headers[i].p_memsz + program_headers[i].p_vaddr, pagesize) / pagesize - vaddr_aligned;
+
+                for (off_t i = vaddr_aligned; i < vaddr_aligned + size_to_protect; i++) {
+                    page_permissions[i] |= prot;
+                }
+
+                munmap(file_block, size_to_map);
+                
+                if (program_headers[i].p_type != PT_LOAD && program_headers[i].p_type != PT_TLS) continue;
+                break;
+
+            case PT_TLS:
+                if (!lib->use_tls) {
+                    lib->use_tls = true;
+                    lib->tls_id = num_tls_maps++;
+                }
+                lib->tls_size = program_headers[i].p_memsz;
+                lib->tls_align = program_headers[i].p_align;
+                if (program_headers[i].p_align != 0)
+                    lib->tls_first_byte_offset = program_headers[i].p_vaddr & (program_headers[i].p_align - 1);
+                else 
+                    lib->tls_first_byte_offset = 0;
+
+                printf("%s Thread local storage at %p - %p, align %d\n", lib->name, program_headers[i].p_vaddr, program_headers[i].p_memsz, program_headers[i].p_align);
+                break;
+                
+        }
     }
+    // Third pass
+    // protect the pages with correct permission
+    for (size_t i = 0; i < total_pages; i++) {
+        mprotect(
+            (void *)(lib->addr + i * pagesize),
+            pagesize,
+            page_permissions[i]
+        );
+    }
+
     free(program_headers);
+    free(page_permissions);
+
+    // Map TLS block;
+    if (lib->use_tls) {
+        lib->tls_block = mmap(NULL, pagesize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        printf("%s TLS BLOCK @ %p\n", lib->name, lib->tls_block);
+    }
+
     // Read sections
 
     Elf64_Shdr *section_headers = malloc(elf_header.e_shnum * sizeof(Elf64_Shdr));
@@ -213,10 +265,14 @@ void FreeLibrary(void *lib) {
 
     if (!map->fake) {
 
-        for (int i = 0; i < map->num_deps; i++) {
+        for (int i = 0; i < map->num_deps; i++)
             FreeLibrary(map->deps[i]);
-        }
+
+        munmap((void *)map->addr, map->size);
         free(map->deps);
+        if (map->use_tls)
+            munmap(map->tls_block, getpagesize());
+        
     }
     free(map);
 }

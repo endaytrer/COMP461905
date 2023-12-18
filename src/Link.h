@@ -7,6 +7,7 @@
 #define _LINKMAP_H 1
 
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <elf.h>
@@ -26,12 +27,15 @@
 
 typedef struct linkMap
 {
-    // base address of the library
+    // base address of the libraryx
     uint64_t addr;
+    size_t size;
+
     // name of the library
     const char *name;
     // absolute address of dynamic segment
     Elf64_Dyn *dyn;
+    
     // a copy of dynamic segement, leave it alone
     Elf64_Dyn *dynInfo[DT_NUM + OS_SPECIFIC_FLAG];
     // if we need the original dlopen to correctly handle this library
@@ -53,6 +57,15 @@ typedef struct linkMap
 
     int num_deps;
     struct linkMap **deps;
+
+    // for TLS storage
+    bool use_tls;
+    void *tls_block;
+    uint64_t tls_id;
+    Elf64_Xword tls_size;
+    Elf64_Xword tls_align;
+    Elf64_Off tls_first_byte_offset;
+
 } LinkMap;
 
 #endif /* Link.h */

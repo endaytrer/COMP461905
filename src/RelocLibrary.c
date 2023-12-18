@@ -6,6 +6,8 @@
 #include <link.h>
 #include <string.h>
 #include <assert.h>
+#include <stdarg.h>
+
 #include "Link.h"
 #include "Loader.h"
 #define HIJACK(function) \
@@ -27,19 +29,31 @@ dl_new_hash(const char *s)
     return h & 0xffffffff;
 }
 
+int v_vzlogx(const void *xref, int prio, const char *format, ...) {
+    printf("[ZEBRA] ");
+    va_list ap;
+    va_start(ap, format);
+    printf(format, ap);
+    printf("\n");
+}
+void v_zlog_tls_buffer_flush() {
+    fflush(stdout);
+}
+
+void v_zlog_tls_buffer_init() {
+}
+void v_zlog_tls_buffer_fini() {
+}
 // find symbol `name` inside the symbol table of `dep`
 void *symbolLookup(LinkMap *dep, const char *name)
 {
+
     if(dep->fake)
     {
-        void *handle = dlopen(dep->name, RTLD_LAZY);
-        if(!handle)
-        {
-            fprintf(stderr, "relocLibrary error: cannot dlopen a fake object named %s", dep->name);
-            abort();
-        }
-        dep->fakeHandle = handle;
-        return dlsym(handle, name);
+        if(!dep->fakeHandle)
+            dep->fakeHandle = dlopen(dep->name, RTLD_LAZY);
+
+        return dlsym(dep->fakeHandle, name);
     }
 
     Elf64_Sym *symtab = (Elf64_Sym *)dep->dynInfo[DT_SYMTAB]->d_un.d_ptr;
@@ -79,6 +93,10 @@ void *symbolLookup(LinkMap *dep, const char *name)
 }
 
 void *search_symbol(LinkMap *node, const char *name) {
+    HIJACK(vzlogx);
+    HIJACK(zlog_tls_buffer_flush);
+    HIJACK(zlog_tls_buffer_init);
+    HIJACK(zlog_tls_buffer_fini);
     if (node == NULL) return NULL;
     void *symbol_addr;
     if ((symbol_addr = symbolLookup(node, name)) != NULL)
@@ -154,6 +172,12 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
             void *new_symbol = malloc(symbol.st_size);
             memcpy(new_symbol, fixed_address, symbol.st_size);
             *addr = (uint64_t)new_symbol;
+        } else if (reloc_type == R_X86_64_DTPMOD64) {
+            *addr = lib->tls_id;
+        } else if (reloc_type == R_X86_64_TPOFF64) {
+            size_t symbol_index = rela[i].r_info >> 32;
+            Elf64_Sym symbol = symbol_table[symbol_index];
+            *addr = (uint64_t)lib->tls_block + symbol.st_value + rela[i].r_addend;
         } else {
 
             // Here I just malloc for every entry
@@ -161,13 +185,13 @@ void reloc_rela(LinkMap *lib, Elf64_Rela *rela, Elf64_Sym *symbol_table, const c
 
             printf("%s, unexpected reloc type = %d\n", lib->name, reloc_type);
 
-            size_t symbol_index = rela[i].r_info >> 32;
-            Elf64_Sym symbol = symbol_table[symbol_index];
+            // size_t symbol_index = rela[i].r_info >> 32;
+            // Elf64_Sym symbol = symbol_table[symbol_index];
             // void *new_symbol = malloc(symbol.st_size);
-            *addr = 0x1919810;
         }
     }
 }
+
 
 void RelocLibrary(LinkMap *lib, int mode)
 {
